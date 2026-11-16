@@ -170,3 +170,44 @@ ESLint 10 and TypeScript 6 both work with the existing configs after the changes
 Jest on Nest 12 needs `NODE_OPTIONS=--experimental-vm-modules` on Node 26 because the Nest 12
 packages are ESM-only and Jest needs its VM module support to `require(esm)`. This is set in the
 server `test*` scripts.
+
+## Phase 4/5 additions and security notes
+
+New files (not part of the original tree):
+
+- `server/src/appointments/*` — read-only `GET /appointments?date=YYYY-MM-DD`, guarded by JWT and
+  restricted to the `DOCTOR` and `ADMIN` roles; reuses `PrismaService`.
+- `server/prisma/migrations/20261116130000_add_doctor_role/migration.sql` — additive enum value only.
+- `server/prisma/migrations/20261116120000_add_appointments/migration.sql` — additive table/index only.
+- `server/prisma/seed.ts` — development seed script, never imported by application code.
+- `client/src/app/dashboard/page.tsx`, `client/src/components/appointments-dashboard.tsx` — dashboard UI.
+- `client/src/lib/api.ts`, `client/src/app/api/proxy/[...path]/route.ts` — same-origin proxy; the API base
+  URL is read from `API_BASE_URL` on the Next.js server, so no API URL is hardcoded in browser code.
+- `client/src/app/api/health/route.ts` — container health endpoint.
+- Root `README.md`, `.env.example`, `.gitignore`; `client/.env.example`.
+
+Authorization check performed against the Docker stack:
+
+| Caller | `GET /appointments` |
+| --- | --- |
+| no token | 401 |
+| self-registered `USER` | 403 |
+| `DOCTOR` | 200 |
+
+`RolesGuard` was only reading handler-level `@Roles()` metadata; it now uses
+`getAllAndOverride` over handler + class so class-level roles cannot be bypassed.
+
+### Remaining security findings (not changed)
+
+1. **Rotate the leaked JWT fallback secret.** It was committed and the repo has a GitHub remote.
+   See the secrets section above. History was not rewritten.
+2. **Public sign-up is still open.** Anyone can create a `USER` account. Such accounts cannot read
+   appointments (403), but they can reach the legacy `/dashboard/user` page and the auth endpoints.
+   Before real patient data is used, disable self-signup or make accounts invite-only.
+3. **Tokens live in `localStorage`** in the existing client and are returned in the sign-in JSON
+   response. A successful XSS can steal them. Refresh tokens are issued but there is no refresh or
+   revocation endpoint.
+4. **No rate limiting** on `/auth/signin` or `/auth/signup`; no account lockout.
+5. Legacy admin/moderator pages still expose user name/email lists; they are role-guarded but were
+   left as REVIEW items.
+6. HTTP is used locally; TLS termination is expected in front of the stack.
