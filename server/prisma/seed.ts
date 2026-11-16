@@ -20,7 +20,9 @@ function todayIn(timeZoneName: string): string {
 }
 
 function at(date: string, time: string): Date {
-  return new Date(new TZDate(`${date}T${time}:00`, timeZone));
+  const [year, month, day] = date.split('-').map(Number);
+  const [hour, minute] = time.split(':').map(Number);
+  return new Date(new TZDate(year, month - 1, day, hour, minute, 0, timeZone));
 }
 
 async function main() {
@@ -76,10 +78,24 @@ async function main() {
         durationMinutes: 20,
         status: 'CANCELLED',
       },
+      {
+        patientName: 'Mariam Shah',
+        service: 'Crown fitting',
+        startsAt: at(today, '18:30'),
+        durationMinutes: 50,
+        status: 'CONFIRMED',
+      },
+      {
+        patientName: 'Zainab Riaz',
+        service: 'Dental cleaning',
+        startsAt: at(today, '19:15'),
+        durationMinutes: 30,
+        status: 'BOOKED',
+      },
     ],
   });
 
-  console.log(`Seeded 6 appointments for ${today} (${timeZone}).`);
+  console.log(`Seeded 8 appointments for ${today} (${timeZone}).`);
 }
 
 main()

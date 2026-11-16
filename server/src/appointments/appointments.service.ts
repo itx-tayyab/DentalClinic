@@ -68,7 +68,8 @@ export class AppointmentsService {
       throw new BadRequestException('date must be in YYYY-MM-DD format');
     }
 
-    const start = new TZDate(`${date}T00:00:00`, timeZone);
+    const [year, month, day] = date.split('-').map(Number);
+    const start = new TZDate(year, month - 1, day, 0, 0, 0, timeZone);
     const formatted = new Intl.DateTimeFormat('en-CA', {
       timeZone,
       year: 'numeric',
