@@ -134,3 +134,56 @@ were not touched.
 Its dev-dependency flags (`tailwindcss`, `@tailwindcss/postcss`, `@types/node`, `@types/react-dom`) are
 false positives: Tailwind v4 is loaded by `postcss.config.mjs`, and the `@types` packages supply the
 ambient types used by the Next.js config and React DOM. Nothing was removed.
+
+## Package updates (Phase 3)
+
+The client was already on current stable versions from the previous cleanup. `npm-check-updates`
+reported only one remaining major:
+
+| Package | Latest | Decision |
+| --- | --- | --- |
+| TypeScript | 7.0.2 | **Pinned to 6.0.3.** TypeScript 7 is the new native compiler. `eslint-config-next@16.4.6` depends on `typescript-eslint@8.72.2`, whose peer range is `>=4.8.4 <6.1.0`. Upgrading would break linting. |
+
+Everything else is at the latest stable: Next.js 16.4.6, React/React DOM 19.3.1, ESLint 10.15.0,
+`eslint-config-next` 16.4.6, Tailwind CSS 4.1.16, `@types/node` 26.6.6.
+
+Added for the dashboard: `@date-fns/tz` (fixture local-time conversion) and `tsx` (development test
+runner). `engines.node` is `>=26.13.1` (current LTS) and `.nvmrc` contains `26.13.1`.
+
+Verification of this phase ran `lint`, `typecheck`, `test` and `build` after installation. The host
+that ran the checks has Node 24.16; the package engines target Node 26 LTS. The code uses only APIs
+available in both.
+
+## Dashboard implementation (Phase 4)
+
+Files added for the frontend-only design:
+
+| Path | Purpose |
+| --- | --- |
+| `client/src/app/api/appointments/route.ts` | Server-only GET handler; reads `N8N_APPOINTMENTS_URL` / `N8N_DASHBOARD_KEY`, forwards `date`, normalizes events, or serves fixtures. |
+| `client/src/lib/appointments.ts` | Pure parsing/normalization: `Name - phone (service)` summaries, description phone, event wrappers, status calculation, fixture builder. |
+| `client/src/lib/api.ts` | Shared types, response validation, date/time helpers. |
+| `client/src/lib/session.ts` | HMAC-SHA256 signed session value (Web Crypto). |
+| `client/src/proxy.ts` | Next.js 16 request gate (formerly `middleware.ts`); redirects pages to `/login`, returns 401 for APIs. |
+| `client/src/app/api/auth/login/route.ts` | Constant-time password check, sets HttpOnly/SameSite cookie. |
+| `client/src/app/api/auth/logout/route.ts` | Clears the cookie. |
+| `client/src/app/login/page.tsx` | Password form with error state. |
+| `client/fixtures/appointments.json` | Fake sample appointments only. |
+| `client/src/lib/appointments.test.ts`, `session.test.ts` | Node test runner tests for parsing, dates and cookie signing. |
+
+No `NEXT_PUBLIC_` variable exists, so the webhook URL and key cannot leak into browser code. The
+appointments route is GET-only; there are no booking, cancel, reschedule or other write handlers.
+
+## Verification (Phase 5)
+
+- `npm run lint`, `npm run typecheck`, `npm test` (10 tests) and `npm run build` all pass.
+- With `DASHBOARD_USE_FIXTURES=true`: unauthenticated `/` redirects to `/login`, unauthenticated
+  `/api/appointments` returns 401, a wrong password shows the error, the correct password sets the
+  cookie and renders 9 fixtures, the date switcher refetches, sign-out returns to `/login`, and the
+  browser console has no errors.
+- Mobile (390 px) and desktop (1280 px) layouts were screenshotted and checked.
+- With fixtures disabled and an unreachable n8n URL, `/api/appointments` returns 502 and the UI shows
+  its error state.
+- The live n8n webhook was **not** tested; no URL or key is available in this repo.
+- The empty state is implemented but fixtures always return sample rows; it is exercised when n8n
+  returns an empty event list.

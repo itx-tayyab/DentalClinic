@@ -3,7 +3,10 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
-  apiPath,
+  formatDateLabel,
+  formatTime,
+  isAppointmentsResponse,
+  shiftDate,
   type Appointment,
   type AppointmentStatus,
   type AppointmentsResponse,
@@ -15,46 +18,16 @@ interface AppointmentsDashboardProps {
 }
 
 const statusStyles: Record<AppointmentStatus, string> = {
-  BOOKED: "bg-amber-100 text-amber-800",
-  CONFIRMED: "bg-sky-100 text-sky-800",
-  COMPLETED: "bg-emerald-100 text-emerald-800",
-  CANCELLED: "bg-rose-100 text-rose-700",
-  NO_SHOW: "bg-zinc-200 text-zinc-700",
+  upcoming: "bg-sky-100 text-sky-800",
+  now: "bg-emerald-100 text-emerald-800",
+  past: "bg-zinc-200 text-zinc-700",
 };
 
 const statusLabels: Record<AppointmentStatus, string> = {
-  BOOKED: "Booked",
-  CONFIRMED: "Confirmed",
-  COMPLETED: "Completed",
-  CANCELLED: "Cancelled",
-  NO_SHOW: "No show",
+  upcoming: "Upcoming",
+  now: "Now",
+  past: "Past",
 };
-
-const activeStatuses: AppointmentStatus[] = ["BOOKED", "CONFIRMED"];
-
-function shiftDate(date: string, days: number): string {
-  const value = new Date(`${date}T12:00:00Z`);
-  value.setUTCDate(value.getUTCDate() + days);
-  return value.toISOString().slice(0, 10);
-}
-
-function formatTime(iso: string, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(new Date(iso));
-}
-
-function formatDateLabel(date: string): string {
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone: "UTC",
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  }).format(new Date(`${date}T00:00:00Z`));
-}
 
 function SummaryCard({
   label,
@@ -83,22 +56,31 @@ function AppointmentRow({
   appointment: Appointment;
   timeZone: string;
 }) {
+  const minutes = Math.round(
+    (Date.parse(appointment.end) - Date.parse(appointment.start)) / 60_000,
+  );
+
   return (
-    <li className="flex flex-col gap-2 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+    <li className="flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-start gap-4">
         <div className="w-20 shrink-0">
           <p className="text-base font-semibold tabular-nums text-zinc-900">
-            {formatTime(appointment.startsAt, timeZone)}
+            {formatTime(appointment.start, timeZone)}
           </p>
           <p className="text-xs text-zinc-500">
-            {appointment.durationMinutes} min
+            {minutes > 0 ? `${minutes} min` : ""}
           </p>
         </div>
         <div className="min-w-0">
           <p className="truncate font-medium text-zinc-900">
             {appointment.patientName}
           </p>
-          <p className="truncate text-sm text-zinc-600">{appointment.service}</p>
+          <p className="truncate text-sm text-zinc-600">
+            {appointment.service}
+          </p>
+          <p className="mt-0.5 text-sm text-zinc-500">
+            {appointment.phone || "Phone not provided"}
+          </p>
         </div>
       </div>
       <span
@@ -121,64 +103,47 @@ export function AppointmentsDashboard({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
-  const [now, setNow] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
     let active = true;
 
-    const token = window.localStorage.getItem("token");
-    if (!token) {
-      // The auth state is already known on mount, so no request is made.
-      /* eslint-disable react-hooks/set-state-in-effect */
-      setData(null);
-      setError("Please sign in to view the appointment list.");
-      setLoading(false);
-      /* eslint-enable react-hooks/set-state-in-effect */
-      return () => controller.abort();
-    }
+    const load = async () => {
+      setLoading(true);
+      setError(null);
 
-    setLoading(true);
-    setError(null);
+      try {
+        const response = await fetch(
+          `/api/appointments?date=${encodeURIComponent(date)}`,
+          { cache: "no-store", signal: controller.signal },
+        );
 
-    fetch(`${apiPath("/appointments")}?date=${encodeURIComponent(date)}`, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal: controller.signal,
-      cache: "no-store",
-    })
-      .then(async (response) => {
         if (!response.ok) {
-          if (response.status === 401 || response.status === 403) {
-            throw new Error("Your session has expired. Please sign in again.");
-          }
-          const body: unknown = await response.json().catch(() => null);
-          const message =
-            typeof body === "object" &&
-            body !== null &&
-            "message" in body &&
-            typeof body.message === "string"
-              ? body.message
-              : "Could not load appointments.";
-          throw new Error(message);
+          throw new Error(
+            response.status === 401
+              ? "Your session has expired. Please sign in again."
+              : "Appointments could not be loaded. Please try again.",
+          );
         }
-        return (await response.json()) as AppointmentsResponse;
-      })
-      .then((payload) => {
-        if (!active) return;
-        setData(payload);
-        setNow(Date.now());
-      })
-      .catch((caught: unknown) => {
+
+        const payload: unknown = await response.json();
+        if (!isAppointmentsResponse(payload)) {
+          throw new Error("The appointments response was not valid.");
+        }
+        if (active) setData(payload);
+      } catch (caught: unknown) {
         if (!active || controller.signal.aborted) return;
         setError(
           caught instanceof Error
             ? caught.message
-            : "Could not load appointments.",
+            : "Appointments could not be loaded.",
         );
-      })
-      .finally(() => {
+      } finally {
         if (active) setLoading(false);
-      });
+      }
+    };
+
+    void Promise.resolve().then(load);
 
     return () => {
       active = false;
@@ -187,16 +152,11 @@ export function AppointmentsDashboard({
   }, [date, reloadKey]);
 
   const appointments = data?.appointments ?? [];
-  const cancelled = appointments.filter(
-    (appointment) => appointment.status === "CANCELLED",
-  ).length;
-  const completed = appointments.filter(
-    (appointment) => appointment.status === "COMPLETED",
-  ).length;
   const upcoming = appointments.filter(
-    (appointment) =>
-      activeStatuses.includes(appointment.status) &&
-      new Date(appointment.startsAt).getTime() >= now,
+    (appointment) => appointment.status === "upcoming",
+  );
+  const past = appointments.filter(
+    (appointment) => appointment.status === "past",
   );
   const nextAppointment = upcoming[0];
 
@@ -247,10 +207,18 @@ export function AppointmentsDashboard({
             >
               Today
             </button>
+            <form action="/api/auth/logout" method="post">
+              <button
+                type="submit"
+                className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100"
+              >
+                Sign out
+              </button>
+            </form>
           </div>
         </header>
 
-        {loading && (
+        {loading ? (
           <div role="status" aria-live="polite" className="mt-8">
             <span className="sr-only">Loading appointments</span>
             <div className="grid gap-3 sm:grid-cols-3">
@@ -265,14 +233,14 @@ export function AppointmentsDashboard({
               {[0, 1, 2, 3].map((item) => (
                 <div
                   key={item}
-                  className="h-20 animate-pulse rounded-xl bg-zinc-200"
+                  className="h-24 animate-pulse rounded-xl bg-zinc-200"
                 />
               ))}
             </div>
           </div>
-        )}
+        ) : null}
 
-        {!loading && error && (
+        {!loading && error ? (
           <div
             role="alert"
             className="mt-8 rounded-xl border border-rose-200 bg-rose-50 p-6"
@@ -289,44 +257,42 @@ export function AppointmentsDashboard({
               >
                 Try again
               </button>
-              <Link
-                href="/signin"
-                className="rounded-lg border border-rose-300 px-3 py-2 text-sm font-semibold text-rose-800 hover:bg-rose-100"
-              >
-                Sign in
-              </Link>
+              {error.includes("session") ? (
+                <Link
+                  href="/login"
+                  className="rounded-lg border border-rose-300 px-3 py-2 text-sm font-semibold text-rose-800 hover:bg-rose-100"
+                >
+                  Sign in
+                </Link>
+              ) : null}
             </div>
           </div>
-        )}
+        ) : null}
 
-        {!loading && !error && (
+        {!loading && !error ? (
           <>
             <section className="mt-8 grid gap-3 sm:grid-cols-3">
               <SummaryCard
                 label="Total today"
                 value={appointments.length}
-                hint={
-                  cancelled > 0
-                    ? `${cancelled} cancelled`
-                    : "All scheduled appointments"
-                }
+                hint={`${past.length} past`}
               />
               <SummaryCard
                 label="Upcoming"
                 value={upcoming.length}
                 hint={
                   nextAppointment
-                    ? `Next at ${formatTime(nextAppointment.startsAt, timeZone)}`
+                    ? `Next at ${formatTime(nextAppointment.start, timeZone)}`
                     : "Nothing left today"
                 }
               />
               <SummaryCard
-                label="Completed"
-                value={completed}
+                label="Done"
+                value={past.length}
                 hint={
-                  appointments.length > 0
-                    ? `${completed} of ${appointments.length} done`
-                    : "No appointments scheduled"
+                  nextAppointment
+                    ? `Next at ${formatTime(nextAppointment.start, timeZone)}`
+                    : "No appointments left"
                 }
               />
             </section>
@@ -368,7 +334,7 @@ export function AppointmentsDashboard({
               )}
             </section>
           </>
-        )}
+        ) : null}
       </main>
     </div>
   );

@@ -1,106 +1,112 @@
 # Dental Clinic Dashboard
 
-Read-only dashboard for the clinic doctor: today's appointments (time, patient, service, status).
-Booking happens in the separate WhatsApp bot; this app does not create, edit or delete appointments.
+Read-only dashboard for the clinic doctor. It shows **today's appointments** — how many, who, what
+service, and what time — plus a date switcher. Booking, cancelling and rescheduling stay in the n8n
+WhatsApp workflow; this app has no write actions.
 
-- `/server` — NestJS 12 + Prisma 6 + PostgreSQL API (JWT auth).
-- `/client` — Next.js 16 (App Router, TypeScript, Tailwind CSS) dashboard.
-- `docker-compose.yml` — PostgreSQL + server + client with health checks.
+- Frontend only: Next.js 16 (App Router, TypeScript, Tailwind CSS) in `/client`.
+- Appointments come from Google Calendar through an n8n webhook.
+- One Next.js route handler proxies the webhook so `N8N_DASHBOARD_KEY` never reaches the browser.
+- A password gate (signed, HttpOnly cookie) protects patient data.
 
-> This repo started life as a generic NestJS auth/user scaffold. See [AUDIT.md](./AUDIT.md) for the
-> audit, every file decision and the security findings.
+See [AUDIT.md](./AUDIT.md) for the file audit, decisions and security notes.
 
 ## Environment variables
 
-Copy the examples and fill in real values (never commit them):
+All values are **server-only**. Never prefix them with `NEXT_PUBLIC_`.
 
-- Root `.env` (Docker Compose): `POSTGRES_PASSWORD`, `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET`,
-  `CLINIC_TIMEZONE`, `CLIENT_ORIGIN`.
-- `server/.env` (local development): `DATABASE_URL`, `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET`,
-  `PORT`, `CORS_ORIGIN`, `CLINIC_TIMEZONE`.
-- `client/.env.local` (local development): `API_BASE_URL`, `CLINIC_TIMEZONE`, `PORT`.
+| Variable | Required | Where the value comes from |
+| --- | --- | --- |
+| `N8N_APPOINTMENTS_URL` | yes (unless fixtures) | The n8n Webhook node URL that returns today's Google Calendar events. |
+| `N8N_DASHBOARD_KEY` | yes (unless fixtures) | Shared secret configured in n8n; sent as the `x-dashboard-key` header. |
+| `DASHBOARD_PASSWORD` | yes | Password the doctor types at the login gate. |
+| `DASHBOARD_TIMEZONE` | yes | IANA zone for “today” and displayed times, e.g. `Asia/Karachi`. |
+| `DASHBOARD_USE_FIXTURES` | no | `true` uses `fixtures/appointments.json` instead of n8n. Never use in production. |
 
-Generate secrets with `openssl rand -hex 32`.
+Copy `client/.env.example` to `client/.env.local` and fill it in. `.env.local` is git-ignored.
 
-## Run with Docker (recommended)
-
-```bash
-cp .env.example .env          # then fill in the values
-docker compose up --build -d
-docker compose ps             # all three services must be healthy
-```
-
-The API is on <http://localhost:8000>, the dashboard on <http://localhost:3000>.
-On a fresh database the appointment list is empty; load development data only:
+## Run locally
 
 ```bash
-docker compose --profile tools run --rm seed
-```
-
-Create a staff account and promote it to `DOCTOR` (self-signup always creates `USER`):
-
-```bash
-curl -X POST http://localhost:8000/auth/signup \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"Dr Ayesha","email":"doctor@clinic.test","password":"change-me-please"}'
-
-docker compose exec db psql -U dental -d dental_clinic \
-  -c "UPDATE \"User\" SET role='DOCTOR' WHERE email='doctor@clinic.test';"
-```
-
-Then sign in at <http://localhost:3000/signin>.
-
-Useful endpoints:
-
-```bash
-curl http://localhost:8000/health
-curl http://localhost:3000/api/health
-curl -H "Authorization: Bearer <token>" \
-  "http://localhost:8000/appointments?date=$(date +%F)"
-```
-
-Stop the stack with `docker compose down` (keeps the database volume).
-
-## Run locally without Docker for the app
-
-Requires Node.js 24.9+ (Node 26 LTS is used in the images) and a PostgreSQL 17 database.
-
-```bash
-# 1. A development database
-docker run -d --name dental-db \
-  -e POSTGRES_PASSWORD=devpassword -e POSTGRES_DB=dental_clinic \
-  -p 5433:5432 postgres:17.12-alpine
-
-# 2. Server
-cd server
-cp .env.example .env          # set DATABASE_URL=postgresql://postgres:devpassword@localhost:5433/dental_clinic
-npm ci
-npx prisma migrate deploy
-npm run db:seed               # optional development data
-npm run start:dev
-
-# 3. Client (separate terminal)
 cd client
-cp .env.example .env.local
+cp .env.example .env.local      # fill in the values
 npm ci
-npm run dev
+npm run dev                     # http://localhost:3000
 ```
 
-Open <http://localhost:3000>. The date switcher defaults to today in `CLINIC_TIMEZONE`.
-
-## Checks
+Use fixtures while n8n is not wired up:
 
 ```bash
-cd server && npm run lint && npm test && npm run build
-cd client && npm run lint && npm run build
+# in .env.local
+DASHBOARD_USE_FIXTURES="true"
 ```
 
-Server tests need `NODE_OPTIONS=--experimental-vm-modules` on Node 26 because NestJS 12 ships ESM-only
-packages; the `npm test` scripts already set it.
+The fixture file contains fake names and phone numbers only. Real patient data must never be committed.
 
-## API
+Checks:
 
-`GET /appointments?date=YYYY-MM-DD` — requires a bearer token with role `DOCTOR` or `ADMIN`.
-Returns `{ date, timeZone, appointments: [{ id, patientName, service, startsAt, durationMinutes,
-status }] }`, ordered by start time. There are no write endpoints. Seed data is never loaded in
-production; run the seed profile/script only in development.
+```bash
+cd client
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+## n8n webhook contract
+
+`GET /api/appointments?date=YYYY-MM-DD` (server-side) calls:
+
+```text
+GET {N8N_APPOINTMENTS_URL}?date=YYYY-MM-DD
+x-dashboard-key: {N8N_DASHBOARD_KEY}
+```
+
+The handler accepts an array of Google Calendar events or an object wrapping them under
+`events`, `items`, `appointments`, `data` or `body` (including n8n `{ json: ... }` items). Each event
+should have `id`, `summary`, `description`, `start.dateTime` and `end.dateTime`.
+
+Event summaries are parsed as:
+
+```text
+Name - phone (service)
+```
+
+The phone is preferred from `description`; the summary phone is the fallback. All-day events without a
+`dateTime` are ignored. The browser receives only:
+
+```json
+{
+  "date": "2026-11-16",
+  "timeZone": "Asia/Karachi",
+  "source": "n8n",
+  "appointments": [
+    {
+      "id": "event-id",
+      "start": "2026-11-16T04:00:00.000Z",
+      "end": "2026-11-16T04:30:00.000Z",
+      "patientName": "Ayesha Khan",
+      "phone": "+92 300 0000001",
+      "service": "Dental cleaning",
+      "status": "past"
+    }
+  ]
+}
+```
+
+`status` is computed from the start/end time: `upcoming`, `now` or `past`.
+
+## Access control
+
+`client/src/proxy.ts` is the Next.js 16 request gate (the file convention formerly called
+middleware). It checks an HMAC-signed, HttpOnly, SameSite=Lax cookie before any page or API route is
+served. The cookie is issued by `POST /api/auth/login` after comparing `DASHBOARD_PASSWORD`, expires
+after 12 hours and is signed with a key derived from that password (changing the password revokes all
+sessions). Unauthenticated API calls receive `401`; pages redirect to `/login`.
+
+## Deployment notes
+
+- Set the variables in the hosting provider’s server environment, not in client-side build variables.
+- Serve over HTTPS. The session cookie is marked `Secure` when `NODE_ENV=production`.
+- Keep `DASHBOARD_USE_FIXTURES` unset/false in production.
+- No database of this app exists; the n8n workflow and its Postgres chat history are untouched.

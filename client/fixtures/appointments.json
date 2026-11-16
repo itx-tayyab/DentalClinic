@@ -1,0 +1,76 @@
+{
+  "appointments": [
+    {
+      "id": "fixture-1",
+      "patientName": "Ayesha Khan",
+      "phone": "+92 300 0000001",
+      "service": "Dental cleaning",
+      "startTime": "09:00",
+      "durationMinutes": 30
+    },
+    {
+      "id": "fixture-2",
+      "patientName": "Bilal Ahmed",
+      "phone": "+92 300 0000002",
+      "service": "Root canal review",
+      "startTime": "10:00",
+      "durationMinutes": 45
+    },
+    {
+      "id": "fixture-3",
+      "patientName": "Fatima Noor",
+      "phone": "+92 300 0000003",
+      "service": "Composite filling",
+      "startTime": "11:15",
+      "durationMinutes": 40
+    },
+    {
+      "id": "fixture-4",
+      "patientName": "Hassan Ali",
+      "phone": "+92 300 0000004",
+      "service": "Tooth extraction",
+      "startTime": "12:30",
+      "durationMinutes": 60
+    },
+    {
+      "id": "fixture-5",
+      "patientName": "Sana Iqbal",
+      "phone": "+92 300 0000005",
+      "service": "Braces adjustment",
+      "startTime": "14:00",
+      "durationMinutes": 30
+    },
+    {
+      "id": "fixture-6",
+      "patientName": "Mariam Shah",
+      "phone": "+92 300 0000006",
+      "service": "Crown fitting",
+      "startTime": "15:30",
+      "durationMinutes": 45
+    },
+    {
+      "id": "fixture-7",
+      "patientName": "Zainab Riaz",
+      "phone": "+92 300 0000007",
+      "service": "Dental cleaning",
+      "startTime": "17:30",
+      "durationMinutes": 30
+    },
+    {
+      "id": "fixture-8",
+      "patientName": "Usman Tariq",
+      "phone": "+92 300 0000008",
+      "service": "Consultation",
+      "startTime": "18:30",
+      "durationMinutes": 30
+    },
+    {
+      "id": "fixture-9",
+      "patientName": "Hira Yousaf",
+      "phone": "+92 300 0000009",
+      "service": "Root canal review",
+      "startTime": "19:30",
+      "durationMinutes": 45
+    }
+  ]
+}
