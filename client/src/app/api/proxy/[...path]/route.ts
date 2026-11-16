@@ -8,13 +8,18 @@ async function proxyRequest(
   request: NextRequest,
   context: RouteContext,
 ): Promise<NextResponse> {
-  const baseUrl = (
-    process.env.API_BASE_URL ?? "http://localhost:8000"
-  ).replace(/\/+$/, "");
+  const baseUrl = process.env.API_BASE_URL;
+  if (!baseUrl) {
+    return NextResponse.json(
+      { message: "API_BASE_URL is not configured on the server." },
+      { status: 500 },
+    );
+  }
+
   const { path } = await context.params;
-  const target = `${baseUrl}/${path.map(encodeURIComponent).join("/")}${
-    request.nextUrl.search
-  }`;
+  const target = `${baseUrl.replace(/\/+$/, "")}/${path
+    .map(encodeURIComponent)
+    .join("/")}${request.nextUrl.search}`;
 
   const headers = new Headers();
   for (const [key, value] of request.headers) {
