@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Dental Clinic Dashboard",
-  description: "Today's appointments for the dental clinic.",
+  title: "Bright Smile Dental",
+  description: "Today's appointments for Bright Smile Dental Clinic.",
 };
 
 export default function RootLayout({
