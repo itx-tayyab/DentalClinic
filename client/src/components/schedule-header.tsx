@@ -30,14 +30,14 @@ export function ScheduleHeader({
             </span>
           </div>
 
-          {/* Desktop Day / Week Switcher */}
-          <div className="hidden sm:flex items-center rounded-lg bg-zinc-100 p-0.5 text-xs font-medium">
+          {/* Day / Week Switcher (All viewports) */}
+          <div className="flex items-center rounded-lg bg-zinc-100 p-0.5 text-xs font-medium">
             <button
               type="button"
               onClick={() => onViewModeChange?.("day")}
-              className={`rounded-md px-3 py-1.5 transition-all ${
+              className={`rounded-md px-2.5 sm:px-3 py-1.5 transition-all ${
                 viewMode === "day"
-                  ? "bg-teal-700 text-white shadow-xs"
+                  ? "bg-teal-700 text-white shadow-xs font-semibold"
                   : "text-zinc-600 hover:text-zinc-900"
               }`}
             >
@@ -46,9 +46,9 @@ export function ScheduleHeader({
             <button
               type="button"
               onClick={() => onViewModeChange?.("week")}
-              className={`rounded-md px-3 py-1.5 transition-all ${
+              className={`rounded-md px-2.5 sm:px-3 py-1.5 transition-all ${
                 viewMode === "week"
-                  ? "bg-teal-700 text-white shadow-xs"
+                  ? "bg-teal-700 text-white shadow-xs font-semibold"
                   : "text-zinc-600 hover:text-zinc-900"
               }`}
             >

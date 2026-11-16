@@ -8,6 +8,8 @@ import {
   isAppointmentsResponse,
   isSundayDate,
   shiftDate,
+  getMondayOfWeek,
+  getWeekDays,
 } from "@/lib/api";
 import { ScheduleHeader } from "./schedule-header";
 import { DaySwitcher } from "./day-switcher";
@@ -18,6 +20,7 @@ import { AppointmentRowDesktop } from "./appointment-row-desktop";
 import { AppointmentCardMobile } from "./appointment-card-mobile";
 import { FreeGapRow } from "./free-gap-row";
 import { AppointmentDetailSheet } from "./appointment-detail-sheet";
+import { WeekView } from "./week-view";
 import {
   EmptyState,
   ClosedSundayState,
@@ -52,7 +55,11 @@ export function AppointmentsDashboard({
     useState<Appointment | null>(null);
   const [viewMode, setViewMode] = useState<"day" | "week">("day");
 
-  // Fetch appointments on date/reloadKey change
+  // Week appointments cache: Record<dayDate, Appointment[]>
+  const [weekData, setWeekData] = useState<Record<string, Appointment[]>>({});
+  const [weekLoading, setWeekLoading] = useState(false);
+
+  // Fetch appointments for day view on date/reloadKey change
   useEffect(() => {
     const controller = new AbortController();
     let active = true;
@@ -111,6 +118,57 @@ export function AppointmentsDashboard({
       controller.abort();
     };
   }, [date, reloadKey]);
+
+  // Fetch week appointments when in week mode
+  useEffect(() => {
+    if (viewMode !== "week") return;
+
+    const controller = new AbortController();
+    let active = true;
+
+    const loadWeek = async () => {
+      setWeekLoading(true);
+      const monday = getMondayOfWeek(date);
+      const days = getWeekDays(monday);
+
+      try {
+        const fetchPromises = days.map(async (dayStr) => {
+          try {
+            const res = await fetch(
+              `/api/appointments?date=${encodeURIComponent(dayStr)}`,
+              { cache: "no-store", signal: controller.signal },
+            );
+            if (!res.ok) return { day: dayStr, items: [] };
+            const payload: unknown = await res.json();
+            if (isAppointmentsResponse(payload)) {
+              return { day: dayStr, items: payload.appointments };
+            }
+            return { day: dayStr, items: [] };
+          } catch {
+            return { day: dayStr, items: [] };
+          }
+        });
+
+        const results = await Promise.all(fetchPromises);
+        if (active) {
+          const map: Record<string, Appointment[]> = {};
+          results.forEach(({ day, items }) => {
+            map[day] = items;
+          });
+          setWeekData(map);
+        }
+      } finally {
+        if (active) setWeekLoading(false);
+      }
+    };
+
+    void Promise.resolve().then(loadWeek);
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [date, viewMode, reloadKey]);
 
   // 60-second auto-refresh polling
   useEffect(() => {
@@ -242,157 +300,175 @@ export function AppointmentsDashboard({
         viewMode={viewMode}
         onViewModeChange={setViewMode}
         lastUpdated={lastUpdated}
-        isRefreshing={loading}
+        isRefreshing={loading || weekLoading}
       />
 
       <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
-        {/* Subheader: Date & Action Controls */}
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="text-sm font-semibold text-teal-800">
-              Good morning, Dr. Khan
-            </p>
-            <h1 className="mt-1 text-3xl sm:text-4xl font-bold tracking-tight text-zinc-900">
-              <span className="tabular-nums font-extrabold">{totalCount}</span>{" "}
-              appointments {date === initialDate ? "today" : ""}
-            </h1>
-            <p className="mt-1 text-sm text-zinc-500">
-              {formatDateHeading(date)}
-            </p>
-          </div>
-
-          <DaySwitcher
+        {/* VIEW 1: WEEK VIEW */}
+        {viewMode === "week" ? (
+          <WeekView
             currentDate={date}
             initialDate={initialDate}
-            onDateChange={setDate}
+            timeZone={timeZone}
+            appointmentsByDate={weekData}
+            isLoading={weekLoading}
+            onSelectDay={(selectedDate) => {
+              setDate(selectedDate);
+              setViewMode("day");
+            }}
+            onSelectAppointment={(apt) => setSelectedAppointment(apt)}
+            onWeekChange={(newDate) => setDate(newDate)}
           />
-        </div>
-
-        {/* Loading state */}
-        {loading && !data ? <LoadingSkeleton /> : null}
-
-        {/* Error state */}
-        {!loading && error ? (
-          <ErrorState
-            error={error}
-            onRetry={() => setReloadKey((prev) => prev + 1)}
-          />
-        ) : null}
-
-        {/* Sunday closed state */}
-        {!loading && !error && isSunday ? (
-          <ClosedSundayState
-            onGoToNextDay={() => setDate(shiftDate(date, 1))}
-          />
-        ) : null}
-
-        {/* Empty state (non-Sunday) */}
-        {!loading && !error && !isSunday && totalCount === 0 ? (
-          <EmptyState
-            date={date}
-            onRefresh={() => setReloadKey((prev) => prev + 1)}
-          />
-        ) : null}
-
-        {/* Active schedule display */}
-        {!loading && !error && !isSunday && totalCount > 0 ? (
+        ) : (
+          /* VIEW 2: DAY VIEW */
           <>
-            {/* Horizontal Service Chips (Mobile + Desktop Top) */}
-            <div className="mt-6 flex flex-wrap items-center gap-2">
-              {Object.entries(serviceCounts).map(([service, count]) => (
-                <ServiceChip key={service} service={service} count={count} />
-              ))}
+            {/* Subheader: Date & Action Controls */}
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-teal-800">
+                  Good morning, Dr. Khan
+                </p>
+                <h1 className="mt-1 text-3xl sm:text-4xl font-bold tracking-tight text-zinc-900">
+                  <span className="tabular-nums font-extrabold">{totalCount}</span>{" "}
+                  appointments {date === initialDate ? "today" : ""}
+                </h1>
+                <p className="mt-1 text-sm text-zinc-500">
+                  {formatDateHeading(date)}
+                </p>
+              </div>
+
+              <DaySwitcher
+                currentDate={date}
+                initialDate={initialDate}
+                onDateChange={setDate}
+              />
             </div>
 
-            {/* Split Layout: Schedule (Cols 1-8) + Sidebar (Cols 9-12) */}
-            <div className="mt-6 grid grid-cols-1 gap-8 lg:grid-cols-12">
-              {/* Left Column: Schedule Timeline */}
-              <section className="lg:col-span-8">
-                {/* Active appointment Hero on Mobile */}
-                {activeAppointment ? (
-                  <div className="mb-4 lg:hidden">
-                    <NowCard
-                      patientName={activeAppointment.patientName}
-                      service={activeAppointment.service}
-                      timeRange={`${formatTime(
-                        activeAppointment.start,
-                        timeZone,
-                      )} – ${formatTime(activeAppointment.end, timeZone)}`}
-                      remainingMinutes={remainingNowMinutes}
-                      onClick={() => setSelectedAppointment(activeAppointment)}
-                    />
-                  </div>
-                ) : null}
+            {/* Loading state */}
+            {loading && !data ? <LoadingSkeleton /> : null}
 
-                {/* Next up Hero on Mobile */}
-                {nextAppointment && !activeAppointment ? (
-                  <div className="mb-4 lg:hidden">
-                    <NextUpCard
-                      patientName={nextAppointment.patientName}
-                      service={nextAppointment.service}
-                      timeRange={`${formatTime(
-                        nextAppointment.start,
-                        timeZone,
-                      )} – ${formatTime(nextAppointment.end, timeZone)}`}
-                      phone={nextAppointment.phone}
-                      inMinutes={inMinutesNext}
-                    />
-                  </div>
-                ) : null}
+            {/* Error state */}
+            {!loading && error ? (
+              <ErrorState
+                error={error}
+                onRetry={() => setReloadKey((prev) => prev + 1)}
+              />
+            ) : null}
 
-                {/* Section header */}
-                <div className="flex items-center justify-between pb-3">
-                  <h2 className="text-lg font-bold text-zinc-900">
-                    Schedule
-                  </h2>
-                  <span className="text-xs text-zinc-500 font-medium">
-                    Open 09:00 – 18:00
-                  </span>
+            {/* Sunday closed state */}
+            {!loading && !error && isSunday ? (
+              <ClosedSundayState
+                onGoToNextDay={() => setDate(shiftDate(date, 1))}
+              />
+            ) : null}
+
+            {/* Empty state (non-Sunday) */}
+            {!loading && !error && !isSunday && totalCount === 0 ? (
+              <EmptyState
+                date={date}
+                onRefresh={() => setReloadKey((prev) => prev + 1)}
+              />
+            ) : null}
+
+            {/* Active schedule display */}
+            {!loading && !error && !isSunday && totalCount > 0 ? (
+              <>
+                {/* Horizontal Service Chips (Mobile + Desktop Top) */}
+                <div className="mt-6 flex flex-wrap items-center gap-2">
+                  {Object.entries(serviceCounts).map(([service, count]) => (
+                    <ServiceChip key={service} service={service} count={count} />
+                  ))}
                 </div>
 
-                {/* Mobile Cards Stream */}
-                <div className="space-y-3 lg:hidden">
-                  {appointments.map((appointment, idx) => {
-                    const gap = freeGaps.find((g) => g.afterIndex === idx);
-                    return (
-                      <React.Fragment key={appointment.id}>
-                        <AppointmentCardMobile
-                          appointment={appointment}
-                          timeZone={timeZone}
-                          onSelect={() => setSelectedAppointment(appointment)}
+                {/* Split Layout: Schedule (Cols 1-8) + Sidebar (Cols 9-12) */}
+                <div className="mt-6 grid grid-cols-1 gap-8 lg:grid-cols-12">
+                  {/* Left Column: Schedule Timeline */}
+                  <section className="lg:col-span-8">
+                    {/* Active appointment Hero on Mobile */}
+                    {activeAppointment ? (
+                      <div className="mb-4 lg:hidden">
+                        <NowCard
+                          patientName={activeAppointment.patientName}
+                          service={activeAppointment.service}
+                          timeRange={`${formatTime(
+                            activeAppointment.start,
+                            timeZone,
+                          )} – ${formatTime(activeAppointment.end, timeZone)}`}
+                          remainingMinutes={remainingNowMinutes}
+                          onClick={() => setSelectedAppointment(activeAppointment)}
                         />
-                        {gap ? (
-                          <FreeGapRow
-                            startTime={gap.startTime}
-                            durationText={gap.durationText}
-                            untilText={gap.untilText}
-                          />
-                        ) : null}
-                      </React.Fragment>
-                    );
-                  })}
-                </div>
+                      </div>
+                    ) : null}
 
-                {/* Desktop Tabular View */}
-                <div className="hidden lg:block overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-xs">
-                  <table className="w-full border-collapse text-left">
-                    <thead>
-                      <tr className="border-b border-zinc-200 bg-zinc-50 text-[11px] font-bold uppercase tracking-wider text-zinc-500">
-                        <th className="py-3 pl-4 pr-3">Time</th>
-                        <th className="py-3 px-3">Patient</th>
-                        <th className="py-3 px-3">Service</th>
-                        <th className="py-3 px-3">Length</th>
-                        <th className="py-3 px-3">Source</th>
-                        <th className="py-3 px-3">Phone</th>
-                        <th className="py-3 pl-3 pr-4 text-right">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-100">
+                    {/* Next up Hero on Mobile */}
+                    {nextAppointment && !activeAppointment ? (
+                      <div className="mb-4 lg:hidden">
+                        <NextUpCard
+                          patientName={nextAppointment.patientName}
+                          service={nextAppointment.service}
+                          timeRange={`${formatTime(
+                            nextAppointment.start,
+                            timeZone,
+                          )} – ${formatTime(nextAppointment.end, timeZone)}`}
+                          phone={nextAppointment.phone}
+                          inMinutes={inMinutesNext}
+                        />
+                      </div>
+                    ) : null}
+
+                    {/* Section header */}
+                    <div className="flex items-center justify-between pb-3">
+                      <h2 className="text-lg font-bold text-zinc-900">
+                        Schedule
+                      </h2>
+                      <span className="text-xs text-zinc-500 font-medium">
+                        Open 09:00 – 18:00
+                      </span>
+                    </div>
+
+                    {/* Mobile Cards Stream */}
+                    <div className="space-y-3 lg:hidden">
                       {appointments.map((appointment, idx) => {
                         const gap = freeGaps.find((g) => g.afterIndex === idx);
                         return (
                           <React.Fragment key={appointment.id}>
-                            <AppointmentRowDesktop
+                            <AppointmentCardMobile
+                              appointment={appointment}
+                              timeZone={timeZone}
+                              onSelect={() => setSelectedAppointment(appointment)}
+                            />
+                            {gap ? (
+                              <FreeGapRow
+                                startTime={gap.startTime}
+                                durationText={gap.durationText}
+                                untilText={gap.untilText}
+                              />
+                            ) : null}
+                          </React.Fragment>
+                        );
+                      })}
+                    </div>
+
+                    {/* Desktop Tabular View */}
+                    <div className="hidden lg:block overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-xs">
+                      <table className="w-full border-collapse text-left">
+                        <thead>
+                          <tr className="border-b border-zinc-200 bg-zinc-50 text-[11px] font-bold uppercase tracking-wider text-zinc-500">
+                            <th className="py-3 pl-4 pr-3">Time</th>
+                            <th className="py-3 px-3">Patient</th>
+                            <th className="py-3 px-3">Service</th>
+                            <th className="py-3 px-3">Length</th>
+                            <th className="py-3 px-3">Source</th>
+                            <th className="py-3 px-3">Phone</th>
+                            <th className="py-3 pl-3 pr-4 text-right">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-zinc-100">
+                          {appointments.map((appointment, idx) => {
+                            const gap = freeGaps.find((g) => g.afterIndex === idx);
+                            return (
+                              <React.Fragment key={appointment.id}>
+                                <AppointmentRowDesktop
                               appointment={appointment}
                               timeZone={timeZone}
                               onSelect={() => setSelectedAppointment(appointment)}
@@ -508,6 +584,8 @@ export function AppointmentsDashboard({
             </div>
           </>
         ) : null}
+        </>
+      )}
       </main>
 
       {/* Appointment Detail Bottom Sheet (Decision #2) */}

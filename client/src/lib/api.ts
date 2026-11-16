@@ -126,6 +126,53 @@ export function isSaturdayDate(date: string): boolean {
   return new Date(`${date}T12:00:00Z`).getUTCDay() === 6;
 }
 
+export function getMondayOfWeek(dateStr: string): string {
+  const d = new Date(`${dateStr}T12:00:00Z`);
+  const day = d.getUTCDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setUTCDate(d.getUTCDate() + diff);
+  return d.toISOString().slice(0, 10);
+}
+
+export function getWeekDays(mondayStr: string): string[] {
+  const days: string[] = [];
+  for (let i = 0; i < 7; i++) {
+    days.push(shiftDate(mondayStr, i));
+  }
+  return days;
+}
+
+export function formatDayMonth(dateStr: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    day: "numeric",
+    month: "short",
+  }).format(new Date(`${dateStr}T12:00:00Z`));
+}
+
+export function getDayAbbr(dateStr: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    weekday: "short",
+  })
+    .format(new Date(`${dateStr}T12:00:00Z`))
+    .toUpperCase();
+}
+
+export function formatWeekHeading(mondayStr: string, sundayStr: string): string {
+  const mon = new Date(`${mondayStr}T12:00:00Z`);
+  const sun = new Date(`${sundayStr}T12:00:00Z`);
+  const monDay = mon.getUTCDate();
+  const sunDay = sun.getUTCDate();
+  const month = new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    month: "long",
+  }).format(sun);
+  const year = sun.getUTCFullYear();
+
+  return `Week of ${monDay} – ${sunDay} ${month} ${year}`;
+}
+
 export function formatTime(iso: string, timeZone: string): string {
   return new Intl.DateTimeFormat("en-GB", {
     timeZone,
