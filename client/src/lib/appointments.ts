@@ -124,6 +124,11 @@ export function normalizeN8nPayload(
     const phone = findPhone(description) || parsed.phone;
     const id = asString(source.id) ?? `event-${index}`;
 
+    const isBot =
+      description.toLowerCase().includes("booked by the whatsapp assistant") ||
+      description.toLowerCase().startsWith("booked by");
+    const sourceTag = isBot ? "bot" : "manual";
+
     appointments.push({
       id,
       start: times.start.toISOString(),
@@ -132,6 +137,7 @@ export function normalizeN8nPayload(
       phone,
       service: parsed.service,
       status: statusFor(times.start, times.end, now),
+      source: sourceTag,
     });
   });
 
@@ -190,6 +196,9 @@ export function buildFixtureAppointments(
         start.getTime() + item.durationMinutes * 60 * 1000,
       );
 
+      // Match realistic distribution: most via WhatsApp bot, some manual
+      const source: "bot" | "manual" = item.id === "fixture-5" || item.id === "fixture-8" ? "manual" : "bot";
+
       return {
         id: item.id,
         start: start.toISOString(),
@@ -198,6 +207,7 @@ export function buildFixtureAppointments(
         phone: item.phone,
         service: item.service,
         status: statusFor(start, end, now),
+        source,
       };
     })
     .sort((left, right) => Date.parse(left.start) - Date.parse(right.start));

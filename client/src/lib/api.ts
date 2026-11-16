@@ -1,4 +1,5 @@
 export type AppointmentStatus = "upcoming" | "now" | "past";
+export type AppointmentSource = "bot" | "manual";
 
 export interface Appointment {
   id: string;
@@ -8,6 +9,7 @@ export interface Appointment {
   phone: string;
   service: string;
   status: AppointmentStatus;
+  source?: AppointmentSource;
 }
 
 export interface AppointmentsResponse {
@@ -24,6 +26,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function isAppointment(value: unknown): value is Appointment {
   if (!isRecord(value)) return false;
   const status = value.status;
+  const source = value.source;
 
   return (
     typeof value.id === "string" &&
@@ -32,7 +35,8 @@ function isAppointment(value: unknown): value is Appointment {
     typeof value.patientName === "string" &&
     typeof value.phone === "string" &&
     typeof value.service === "string" &&
-    (status === "upcoming" || status === "now" || status === "past")
+    (status === "upcoming" || status === "now" || status === "past") &&
+    (source === undefined || source === "bot" || source === "manual")
   );
 }
 
@@ -105,10 +109,28 @@ export function formatDateLabel(date: string): string {
   }).format(new Date(`${date}T00:00:00Z`));
 }
 
-export function formatTime(iso: string, timeZone: string): string {
+export function formatDateHeading(date: string): string {
   return new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  }).format(new Date(`${date}T00:00:00Z`));
+}
+
+export function isSundayDate(date: string): boolean {
+  return new Date(`${date}T12:00:00Z`).getUTCDay() === 0;
+}
+
+export function isSaturdayDate(date: string): boolean {
+  return new Date(`${date}T12:00:00Z`).getUTCDay() === 6;
+}
+
+export function formatTime(iso: string, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-GB", {
     timeZone,
-    hour: "numeric",
+    hour: "2-digit",
     minute: "2-digit",
+    hour12: false,
   }).format(new Date(iso));
 }

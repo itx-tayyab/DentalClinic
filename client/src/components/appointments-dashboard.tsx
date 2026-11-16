@@ -1,97 +1,40 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
+import type { Appointment, AppointmentsResponse } from "@/lib/api";
 import {
-  formatDateLabel,
+  formatDateHeading,
   formatTime,
   isAppointmentsResponse,
+  isSundayDate,
   shiftDate,
-  type Appointment,
-  type AppointmentStatus,
-  type AppointmentsResponse,
 } from "@/lib/api";
+import { ScheduleHeader } from "./schedule-header";
+import { DaySwitcher } from "./day-switcher";
+import { ServiceChip, getServiceColor } from "./ui/service-chip";
+import { NowCard } from "./ui/card";
+import { NextUpCard } from "./next-up-card";
+import { AppointmentRowDesktop } from "./appointment-row-desktop";
+import { AppointmentCardMobile } from "./appointment-card-mobile";
+import { FreeGapRow } from "./free-gap-row";
+import { AppointmentDetailSheet } from "./appointment-detail-sheet";
+import {
+  EmptyState,
+  ClosedSundayState,
+  ErrorState,
+  LoadingSkeleton,
+} from "./state-views";
 
 interface AppointmentsDashboardProps {
   timeZone: string;
   initialDate: string;
 }
 
-const statusStyles: Record<AppointmentStatus, string> = {
-  upcoming: "bg-sky-100 text-sky-800",
-  now: "bg-emerald-100 text-emerald-800",
-  past: "bg-zinc-200 text-zinc-700",
-};
-
-const statusLabels: Record<AppointmentStatus, string> = {
-  upcoming: "Upcoming",
-  now: "Now",
-  past: "Past",
-};
-
-function SummaryCard({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: number;
-  hint: string;
-}) {
-  return (
-    <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm">
-      <p className="text-sm font-medium text-zinc-500">{label}</p>
-      <p className="mt-1 text-3xl font-semibold tabular-nums text-zinc-900">
-        {value}
-      </p>
-      <p className="mt-1 text-xs text-zinc-500">{hint}</p>
-    </div>
-  );
-}
-
-function AppointmentRow({
-  appointment,
-  timeZone,
-}: {
-  appointment: Appointment;
-  timeZone: string;
-}) {
-  const minutes = Math.round(
-    (Date.parse(appointment.end) - Date.parse(appointment.start)) / 60_000,
-  );
-
-  return (
-    <li className="flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex items-start gap-4">
-        <div className="w-20 shrink-0">
-          <p className="text-base font-semibold tabular-nums text-zinc-900">
-            {formatTime(appointment.start, timeZone)}
-          </p>
-          <p className="text-xs text-zinc-500">
-            {minutes > 0 ? `${minutes} min` : ""}
-          </p>
-        </div>
-        <div className="min-w-0">
-          <p className="truncate font-medium text-zinc-900">
-            {appointment.patientName}
-          </p>
-          <p className="truncate text-sm text-zinc-600">
-            {appointment.service}
-          </p>
-          <p className="mt-0.5 text-sm text-zinc-500">
-            {appointment.phone || "Phone not provided"}
-          </p>
-        </div>
-      </div>
-      <span
-        className={`w-fit rounded-full px-3 py-1 text-xs font-semibold ${
-          statusStyles[appointment.status]
-        }`}
-      >
-        {statusLabels[appointment.status]}
-      </span>
-    </li>
-  );
+interface FreeGap {
+  startTime: string;
+  durationText: string;
+  untilText?: string;
+  afterIndex: number;
 }
 
 export function AppointmentsDashboard({
@@ -103,7 +46,13 @@ export function AppointmentsDashboard({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [lastUpdated, setLastUpdated] = useState<string>("11:35");
+  const [currentTime, setCurrentTime] = useState<number>(0);
+  const [selectedAppointment, setSelectedAppointment] =
+    useState<Appointment | null>(null);
+  const [viewMode, setViewMode] = useState<"day" | "week">("day");
 
+  // Fetch appointments on date/reloadKey change
   useEffect(() => {
     const controller = new AbortController();
     let active = true;
@@ -122,7 +71,7 @@ export function AppointmentsDashboard({
           throw new Error(
             response.status === 401
               ? "Your session has expired. Please sign in again."
-              : "Appointments could not be loaded. Please try again.",
+              : "Google Calendar didn't respond. Your bookings are safe.",
           );
         }
 
@@ -130,7 +79,19 @@ export function AppointmentsDashboard({
         if (!isAppointmentsResponse(payload)) {
           throw new Error("The appointments response was not valid.");
         }
-        if (active) setData(payload);
+
+        if (active) {
+          setData(payload);
+          const now = new Date();
+          setCurrentTime(now.getTime());
+          setLastUpdated(
+            now.toLocaleTimeString("en-GB", {
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: false,
+            }),
+          );
+        }
       } catch (caught: unknown) {
         if (!active || controller.signal.aborted) return;
         setError(
@@ -151,191 +112,410 @@ export function AppointmentsDashboard({
     };
   }, [date, reloadKey]);
 
-  const appointments = data?.appointments ?? [];
-  const upcoming = appointments.filter(
-    (appointment) => appointment.status === "upcoming",
+  // 60-second auto-refresh polling
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setReloadKey((prev) => prev + 1);
+    }, 60_000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  const appointments = useMemo(
+    () => data?.appointments ?? [],
+    [data?.appointments],
   );
-  const past = appointments.filter(
-    (appointment) => appointment.status === "past",
-  );
-  const nextAppointment = upcoming[0];
+
+  // Service breakdown counts
+  const serviceCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    appointments.forEach((apt) => {
+      const s = apt.service.trim();
+      let category = "Other";
+      if (/clean/i.test(s)) category = "Cleaning";
+      else if (/fill/i.test(s)) category = "Filling";
+      else if (/root|canal/i.test(s)) category = "Root canal";
+      else if (/whiten/i.test(s)) category = "Whitening";
+      else if (/extract/i.test(s)) category = "Extraction";
+      else category = s;
+
+      counts[category] = (counts[category] || 0) + 1;
+    });
+    return counts;
+  }, [appointments]);
+
+  // Active (Now) appointment & Next appointment
+  const { activeAppointment, nextAppointment, remainingNowMinutes, inMinutesNext } =
+    useMemo(() => {
+      const now = currentTime;
+      const active = appointments.find((a) => a.status === "now");
+      const upcoming = appointments.filter((a) => a.status === "upcoming");
+      const next = upcoming[0];
+
+      let remainingNow = 25;
+      if (active && now > 0) {
+        const end = Date.parse(active.end);
+        remainingNow = Math.max(0, Math.round((end - now) / 60_000));
+      }
+
+      let inNext = 25;
+      if (next && now > 0) {
+        const start = Date.parse(next.start);
+        inNext = Math.max(0, Math.round((start - now) / 60_000));
+      }
+
+      return {
+        activeAppointment: active,
+        nextAppointment: next,
+        remainingNowMinutes: remainingNow,
+        inMinutesNext: inNext,
+      };
+    }, [appointments, currentTime]);
+
+  // Total booked time & free time
+  const { bookedText, freeText } = useMemo(() => {
+    let bookedMinutes = 0;
+    appointments.forEach((apt) => {
+      const ms = Date.parse(apt.end) - Date.parse(apt.start);
+      if (ms > 0) bookedMinutes += Math.round(ms / 60_000);
+    });
+
+    const totalClinicMinutes = 9 * 60; // 09:00 to 18:00 = 540 min
+    const freeMinutes = Math.max(0, totalClinicMinutes - bookedMinutes);
+
+    const formatDuration = (mins: number) => {
+      const h = Math.floor(mins / 60);
+      const m = mins % 60;
+      return `${h} h ${m} m`;
+    };
+
+    return {
+      bookedText: formatDuration(bookedMinutes),
+      freeText: formatDuration(freeMinutes),
+    };
+  }, [appointments]);
+
+  // Free gaps calculation
+  const freeGaps = useMemo<FreeGap[]>(() => {
+    const gaps: FreeGap[] = [];
+    if (appointments.length === 0) return gaps;
+
+    for (let i = 0; i < appointments.length - 1; i++) {
+      const curr = appointments[i];
+      const next = appointments[i + 1];
+      if (!curr || !next) continue;
+
+      const currEnd = Date.parse(curr.end);
+      const nextStart = Date.parse(next.start);
+      const gapMins = Math.round((nextStart - currEnd) / 60_000);
+
+      if (gapMins >= 10) {
+        const startStr = formatTime(curr.end, timeZone);
+        const untilStr = formatTime(next.start, timeZone);
+
+        const hours = Math.floor(gapMins / 60);
+        const minutes = gapMins % 60;
+        const durationText =
+          hours > 0
+            ? `${hours} h ${minutes > 0 ? `${minutes} min` : ""} free`
+            : `${minutes} min free`;
+
+        gaps.push({
+          startTime: startStr,
+          durationText,
+          untilText: untilStr,
+          afterIndex: i,
+        });
+      }
+    }
+
+    return gaps;
+  }, [appointments, timeZone]);
+
+  const isSunday = isSundayDate(date);
+  const totalCount = appointments.length;
 
   return (
-    <div className="min-h-screen bg-zinc-50">
-      <main className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 sm:py-10">
-        <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+    <div className="min-h-[100dvh] bg-zinc-50/70 pb-16">
+      {/* Header */}
+      <ScheduleHeader
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+        lastUpdated={lastUpdated}
+        isRefreshing={loading}
+      />
+
+      <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
+        {/* Subheader: Date & Action Controls */}
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <p className="text-sm font-medium text-sky-700">
-              Dental clinic dashboard
+            <p className="text-sm font-semibold text-teal-800">
+              Good morning, Dr. Khan
             </p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-zinc-900 sm:text-3xl">
-              Today&apos;s appointments
+            <h1 className="mt-1 text-3xl sm:text-4xl font-bold tracking-tight text-zinc-900">
+              <span className="tabular-nums font-extrabold">{totalCount}</span>{" "}
+              appointments {date === initialDate ? "today" : ""}
             </h1>
             <p className="mt-1 text-sm text-zinc-500">
-              {formatDateLabel(date)} · {timeZone}
+              {formatDateHeading(date)}
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setDate((current) => shiftDate(current, -1))}
-              className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100"
-              aria-label="Previous day"
-            >
-              Previous
-            </button>
-            <input
-              type="date"
-              value={date}
-              onChange={(event) => setDate(event.target.value)}
-              aria-label="Appointment date"
-              className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700"
-            />
-            <button
-              type="button"
-              onClick={() => setDate((current) => shiftDate(current, 1))}
-              className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100"
-              aria-label="Next day"
-            >
-              Next
-            </button>
-            <button
-              type="button"
-              onClick={() => setDate(initialDate)}
-              className="rounded-lg bg-sky-700 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-800"
-            >
-              Today
-            </button>
-            <form action="/api/auth/logout" method="post">
-              <button
-                type="submit"
-                className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100"
-              >
-                Sign out
-              </button>
-            </form>
-          </div>
-        </header>
+          <DaySwitcher
+            currentDate={date}
+            initialDate={initialDate}
+            onDateChange={setDate}
+          />
+        </div>
 
-        {loading ? (
-          <div role="status" aria-live="polite" className="mt-8">
-            <span className="sr-only">Loading appointments</span>
-            <div className="grid gap-3 sm:grid-cols-3">
-              {[0, 1, 2].map((item) => (
-                <div
-                  key={item}
-                  className="h-28 animate-pulse rounded-xl bg-zinc-200"
-                />
-              ))}
-            </div>
-            <div className="mt-6 space-y-3">
-              {[0, 1, 2, 3].map((item) => (
-                <div
-                  key={item}
-                  className="h-24 animate-pulse rounded-xl bg-zinc-200"
-                />
-              ))}
-            </div>
-          </div>
-        ) : null}
+        {/* Loading state */}
+        {loading && !data ? <LoadingSkeleton /> : null}
 
+        {/* Error state */}
         {!loading && error ? (
-          <div
-            role="alert"
-            className="mt-8 rounded-xl border border-rose-200 bg-rose-50 p-6"
-          >
-            <h2 className="text-base font-semibold text-rose-900">
-              Appointments could not be loaded
-            </h2>
-            <p className="mt-1 text-sm text-rose-800">{error}</p>
-            <div className="mt-4 flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={() => setReloadKey((key) => key + 1)}
-                className="rounded-lg bg-rose-700 px-3 py-2 text-sm font-semibold text-white hover:bg-rose-800"
-              >
-                Try again
-              </button>
-              {error.includes("session") ? (
-                <Link
-                  href="/login"
-                  className="rounded-lg border border-rose-300 px-3 py-2 text-sm font-semibold text-rose-800 hover:bg-rose-100"
-                >
-                  Sign in
-                </Link>
-              ) : null}
-            </div>
-          </div>
+          <ErrorState
+            error={error}
+            onRetry={() => setReloadKey((prev) => prev + 1)}
+          />
         ) : null}
 
-        {!loading && !error ? (
+        {/* Sunday closed state */}
+        {!loading && !error && isSunday ? (
+          <ClosedSundayState
+            onGoToNextDay={() => setDate(shiftDate(date, 1))}
+          />
+        ) : null}
+
+        {/* Empty state (non-Sunday) */}
+        {!loading && !error && !isSunday && totalCount === 0 ? (
+          <EmptyState
+            date={date}
+            onRefresh={() => setReloadKey((prev) => prev + 1)}
+          />
+        ) : null}
+
+        {/* Active schedule display */}
+        {!loading && !error && !isSunday && totalCount > 0 ? (
           <>
-            <section className="mt-8 grid gap-3 sm:grid-cols-3">
-              <SummaryCard
-                label="Total today"
-                value={appointments.length}
-                hint={`${past.length} past`}
-              />
-              <SummaryCard
-                label="Upcoming"
-                value={upcoming.length}
-                hint={
-                  nextAppointment
-                    ? `Next at ${formatTime(nextAppointment.start, timeZone)}`
-                    : "Nothing left today"
-                }
-              />
-              <SummaryCard
-                label="Done"
-                value={past.length}
-                hint={
-                  nextAppointment
-                    ? `Next at ${formatTime(nextAppointment.start, timeZone)}`
-                    : "No appointments left"
-                }
-              />
-            </section>
+            {/* Horizontal Service Chips (Mobile + Desktop Top) */}
+            <div className="mt-6 flex flex-wrap items-center gap-2">
+              {Object.entries(serviceCounts).map(([service, count]) => (
+                <ServiceChip key={service} service={service} count={count} />
+              ))}
+            </div>
 
-            <section className="mt-8">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-zinc-900">
-                  Schedule
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => setReloadKey((key) => key + 1)}
-                  className="text-sm font-medium text-sky-700 hover:text-sky-900"
-                >
-                  Refresh
-                </button>
-              </div>
-
-              {appointments.length === 0 ? (
-                <div className="mt-4 rounded-xl border border-dashed border-zinc-300 bg-white p-10 text-center">
-                  <p className="text-base font-medium text-zinc-800">
-                    No appointments for this day
-                  </p>
-                  <p className="mt-1 text-sm text-zinc-500">
-                    Choose another date or check back later. Bookings are taken
-                    through WhatsApp.
-                  </p>
-                </div>
-              ) : (
-                <ol className="mt-4 space-y-3">
-                  {appointments.map((appointment) => (
-                    <AppointmentRow
-                      key={appointment.id}
-                      appointment={appointment}
-                      timeZone={timeZone}
+            {/* Split Layout: Schedule (Cols 1-8) + Sidebar (Cols 9-12) */}
+            <div className="mt-6 grid grid-cols-1 gap-8 lg:grid-cols-12">
+              {/* Left Column: Schedule Timeline */}
+              <section className="lg:col-span-8">
+                {/* Active appointment Hero on Mobile */}
+                {activeAppointment ? (
+                  <div className="mb-4 lg:hidden">
+                    <NowCard
+                      patientName={activeAppointment.patientName}
+                      service={activeAppointment.service}
+                      timeRange={`${formatTime(
+                        activeAppointment.start,
+                        timeZone,
+                      )} – ${formatTime(activeAppointment.end, timeZone)}`}
+                      remainingMinutes={remainingNowMinutes}
+                      onClick={() => setSelectedAppointment(activeAppointment)}
                     />
-                  ))}
-                </ol>
-              )}
-            </section>
+                  </div>
+                ) : null}
+
+                {/* Next up Hero on Mobile */}
+                {nextAppointment && !activeAppointment ? (
+                  <div className="mb-4 lg:hidden">
+                    <NextUpCard
+                      patientName={nextAppointment.patientName}
+                      service={nextAppointment.service}
+                      timeRange={`${formatTime(
+                        nextAppointment.start,
+                        timeZone,
+                      )} – ${formatTime(nextAppointment.end, timeZone)}`}
+                      phone={nextAppointment.phone}
+                      inMinutes={inMinutesNext}
+                    />
+                  </div>
+                ) : null}
+
+                {/* Section header */}
+                <div className="flex items-center justify-between pb-3">
+                  <h2 className="text-lg font-bold text-zinc-900">
+                    Schedule
+                  </h2>
+                  <span className="text-xs text-zinc-500 font-medium">
+                    Open 09:00 – 18:00
+                  </span>
+                </div>
+
+                {/* Mobile Cards Stream */}
+                <div className="space-y-3 lg:hidden">
+                  {appointments.map((appointment, idx) => {
+                    const gap = freeGaps.find((g) => g.afterIndex === idx);
+                    return (
+                      <React.Fragment key={appointment.id}>
+                        <AppointmentCardMobile
+                          appointment={appointment}
+                          timeZone={timeZone}
+                          onSelect={() => setSelectedAppointment(appointment)}
+                        />
+                        {gap ? (
+                          <FreeGapRow
+                            startTime={gap.startTime}
+                            durationText={gap.durationText}
+                            untilText={gap.untilText}
+                          />
+                        ) : null}
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
+
+                {/* Desktop Tabular View */}
+                <div className="hidden lg:block overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-xs">
+                  <table className="w-full border-collapse text-left">
+                    <thead>
+                      <tr className="border-b border-zinc-200 bg-zinc-50 text-[11px] font-bold uppercase tracking-wider text-zinc-500">
+                        <th className="py-3 pl-4 pr-3">Time</th>
+                        <th className="py-3 px-3">Patient</th>
+                        <th className="py-3 px-3">Service</th>
+                        <th className="py-3 px-3">Length</th>
+                        <th className="py-3 px-3">Source</th>
+                        <th className="py-3 px-3">Phone</th>
+                        <th className="py-3 pl-3 pr-4 text-right">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-100">
+                      {appointments.map((appointment, idx) => {
+                        const gap = freeGaps.find((g) => g.afterIndex === idx);
+                        return (
+                          <React.Fragment key={appointment.id}>
+                            <AppointmentRowDesktop
+                              appointment={appointment}
+                              timeZone={timeZone}
+                              onSelect={() => setSelectedAppointment(appointment)}
+                            />
+                            {gap ? (
+                              <FreeGapRow
+                                startTime={gap.startTime}
+                                durationText={gap.durationText}
+                                untilText={gap.untilText}
+                                isDesktop
+                              />
+                            ) : null}
+                          </React.Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile view only reminder */}
+                <footer className="mt-8 text-center text-xs text-zinc-400 lg:hidden">
+                  View only. Bookings, changes and cancellations happen in WhatsApp.
+                </footer>
+              </section>
+
+              {/* Right Column: Sticky Sidebar on Desktop */}
+              <aside className="hidden lg:block lg:col-span-4 space-y-5">
+                {/* Now card */}
+                {activeAppointment ? (
+                  <NowCard
+                    patientName={activeAppointment.patientName}
+                    service={activeAppointment.service}
+                    timeRange={`${formatTime(
+                      activeAppointment.start,
+                      timeZone,
+                    )} – ${formatTime(activeAppointment.end, timeZone)}`}
+                    remainingMinutes={remainingNowMinutes}
+                    onClick={() => setSelectedAppointment(activeAppointment)}
+                    className="cursor-pointer"
+                  />
+                ) : null}
+
+                {/* Next card */}
+                {nextAppointment ? (
+                  <NextUpCard
+                    patientName={nextAppointment.patientName}
+                    service={nextAppointment.service}
+                    timeRange={`${formatTime(
+                      nextAppointment.start,
+                      timeZone,
+                    )} – ${formatTime(nextAppointment.end, timeZone)}`}
+                    phone={nextAppointment.phone}
+                    inMinutes={inMinutesNext}
+                  />
+                ) : null}
+
+                {/* Services distribution summary card */}
+                <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-xs">
+                  <h3 className="text-sm font-bold text-zinc-900">
+                    Services today
+                  </h3>
+                  <div className="mt-3 space-y-2.5">
+                    {Object.entries(serviceCounts).map(([srv, count]) => {
+                      const { dot } = getServiceColor(srv);
+                      return (
+                        <div
+                          key={srv}
+                          className="flex items-center justify-between text-xs"
+                        >
+                          <div className="flex items-center gap-2 text-zinc-700">
+                            <span
+                              className={`h-2 w-2 rounded-full ${dot}`}
+                              aria-hidden="true"
+                            />
+                            <span>{srv}</span>
+                          </div>
+                          <span className="font-bold tabular-nums text-zinc-900">
+                            {count}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Booked / Free hours metric */}
+                <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-xs">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wide">
+                        Booked
+                      </p>
+                      <p className="mt-1 text-xl font-bold tabular-nums text-zinc-900">
+                        {bookedText}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wide">
+                        Free
+                      </p>
+                      <p className="mt-1 text-xl font-bold tabular-nums text-zinc-900">
+                        {freeText}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Reassurance text */}
+                <p className="text-center text-xs text-zinc-400">
+                  View only. Bookings, changes and cancellations happen in WhatsApp.
+                </p>
+              </aside>
+            </div>
           </>
         ) : null}
       </main>
+
+      {/* Appointment Detail Bottom Sheet (Decision #2) */}
+      <AppointmentDetailSheet
+        appointment={selectedAppointment}
+        timeZone={timeZone}
+        onClose={() => setSelectedAppointment(null)}
+      />
     </div>
   );
 }
