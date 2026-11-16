@@ -5,7 +5,7 @@ interface User {
   id: number;
   name: string;
   email: string;
-  role: "user" | "moderator" | "admin";
+  role: "USER" | "MODERATOR" | "ADMIN";
 }
 
 export default function AdminDashboard() {
@@ -54,7 +54,7 @@ export default function AdminDashboard() {
     setLoading(false);
   };
 
-  const updateRole = async (userId: number, newRole: string) => {
+  const updateRole = async (userId: number, newRole: User["role"]) => {
     const token = localStorage.getItem("token");
     setUpdating(userId);
 
@@ -90,6 +90,7 @@ export default function AdminDashboard() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadUsers();
   }, []);
 
@@ -122,7 +123,7 @@ export default function AdminDashboard() {
                 <td className="border p-2">
                   <select
                     value={u.role}
-                    onChange={(e) => updateRole(u.id, e.target.value)}
+                    onChange={(e) => updateRole(u.id, e.target.value as User["role"])}
                     className="border p-1 rounded"
                     disabled={updating === u.id}
                   >

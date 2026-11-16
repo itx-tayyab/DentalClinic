@@ -2,14 +2,22 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
+interface CurrentUser {
+  name: string;
+  email: string;
+  role: string;
+}
+
 export default function DashboardPage() {
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState<CurrentUser | null>(null);
   const router = useRouter();
 
   useEffect(() => {
     const token = localStorage.getItem("token");
     const currentuser = localStorage.getItem("currentUser");
-    const storedUser = JSON.parse(currentuser);
+    const storedUser: CurrentUser | null = currentuser
+      ? JSON.parse(currentuser)
+      : null;
 
     // If user is not logged in, redirect
     if (!token || !storedUser) {
@@ -17,6 +25,7 @@ export default function DashboardPage() {
       return;
     }
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setUser(storedUser);
   }, [router]);
 
