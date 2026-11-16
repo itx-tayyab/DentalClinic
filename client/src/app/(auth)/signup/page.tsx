@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { apiPath } from "@/lib/api";
 
 export default function SignupPage() {
   const [formData, setFormData] = useState({
@@ -25,7 +26,7 @@ export default function SignupPage() {
     setSuccessMsg("");
 
     try {
-      const response = await fetch("http://localhost:8000/auth/signup", {
+      const response = await fetch(apiPath("/auth/signup"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -41,7 +42,7 @@ export default function SignupPage() {
       }
 
       setSuccessMsg("Account created successfully! 🎉 Redirecting...");
-    } catch (err) {
+    } catch {
       setErrorMsg("Server not reachable. Check backend.");
     } finally {
       setLoading(false);

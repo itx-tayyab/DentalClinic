@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { apiPath } from "@/lib/api";
 
 interface User {
   id: number;
@@ -39,7 +40,7 @@ export default function ModeratorDashboard() {
     setModerator(currentUser);
 
     // Fetch all users
-    fetch("http://localhost:8000/users/moderator/list", {
+    fetch(apiPath("/users/moderator/list"), {
       method: "GET",
       headers: {
         "Authorization": `Bearer ${token}`,

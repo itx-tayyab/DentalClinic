@@ -1,11 +1,12 @@
 "use client";
 import { useEffect, useState } from "react";
+import { apiPath } from "@/lib/api";
 
 interface User {
   id: number;
   name: string;
   email: string;
-  role: "USER" | "MODERATOR" | "ADMIN";
+  role: "USER" | "MODERATOR" | "DOCTOR" | "ADMIN";
 }
 
 export default function AdminDashboard() {
@@ -24,7 +25,7 @@ export default function AdminDashboard() {
     }
 
     try {
-      const res = await fetch("http://localhost:8000/users/admin/list", {
+      const res = await fetch(apiPath("/users/admin/list"), {
         method: "GET",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -47,7 +48,7 @@ export default function AdminDashboard() {
       }
 
       setUsers(data);
-    } catch (err) {
+    } catch {
       setErrorMsg("Cannot connect to backend.");
     }
 
@@ -59,7 +60,7 @@ export default function AdminDashboard() {
     setUpdating(userId);
 
     try {
-      const res = await fetch(`http://localhost:8000/users/${userId}/role`, {
+      const res = await fetch(apiPath(`/users/${userId}/role`), {
         method: "PATCH",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -82,7 +83,7 @@ export default function AdminDashboard() {
     );
 
       alert("Role updated successfully!");
-    } catch (err) {
+    } catch {
       alert("Error connecting to backend");
     }
 
@@ -129,6 +130,7 @@ export default function AdminDashboard() {
                   >
                     <option value="USER">User</option>
                     <option value="MODERATOR">Moderator</option>
+                    <option value="DOCTOR">Doctor</option>
                   </select>
                 </td>
               </tr>

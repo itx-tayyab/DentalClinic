@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { apiPath } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -16,7 +17,7 @@ export default function LoginPage() {
   setLoading(true);
 
   try {
-    const res = await fetch("http://localhost:8000/auth/signin", {
+    const res = await fetch(apiPath("/auth/signin"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -25,7 +26,6 @@ export default function LoginPage() {
     });
 
     const data = await res.json();
-    console.log("SIGNIN RESPONSE:", data); // for debugging
 
     if (!res.ok) {
       setErrorMsg(data.message || "Invalid login credentials");
@@ -45,9 +45,9 @@ export default function LoginPage() {
     } else if (role === "MODERATOR") {
       router.push("/dashboard/moderator");
     } else {
-      router.push("/dashboard/user");
+      router.push("/dashboard");
     }
-  } catch (error) {
+  } catch {
     setErrorMsg("Cannot connect to server. Check backend.");
   }
 
@@ -117,13 +117,6 @@ export default function LoginPage() {
           </Link>
         </p>
 
-        <div className="mt-8 text-center">
-          <p className="text-gray-500 mb-3">or continue with</p>
-          <button className="flex items-center justify-center gap-2 w-full border border-gray-300 py-3 rounded-lg hover:bg-gray-50 transition-all">
-            <img src="/google.svg" alt="Google" className="w-5 h-5" />
-            <span className="text-gray-700 font-medium">Google</span>
-          </button>
-        </div>
       </div>
     </div>
   );
