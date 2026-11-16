@@ -141,3 +141,19 @@ test("rejects impossible dates and defaults to today", () => {
     /^\d{4}-\d{2}-\d{2}$/,
   );
 });
+
+test("hardened parsing handles Roman Urdu names and manual events with odd punctuation", () => {
+  const case1 = parseSummary("Chaudhry Muhammad Zubair - 03001234567 (Root canal)");
+  assert.equal(case1.patientName, "Chaudhry Muhammad Zubair");
+  assert.equal(case1.phone, "03001234567");
+  assert.equal(case1.service, "Root canal");
+
+  const case2 = parseSummary("Imran lab guy - crown pickup?? call b4 (Dr. S)");
+  assert.equal(case2.patientName, "Imran lab guy");
+  assert.equal(case2.service, "Dr. S");
+
+  const case3 = parseSummary("Just a walk-in patient with no phone or service");
+  assert.equal(case3.patientName, "Just a walk-in patient with no phone or service");
+  assert.equal(case3.phone, "");
+  assert.equal(case3.service, "Appointment");
+});
