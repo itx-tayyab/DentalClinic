@@ -8,7 +8,7 @@ export class UserService {
 
   // Admin: update user role
   async updateUserRole(userId: number, role: string) {
-    if (!['USER', 'MODERATOR', 'ADMIN'].includes(role)) {
+    if (!['USER', 'MODERATOR', 'DOCTOR', 'ADMIN'].includes(role)) {
       throw new BadRequestException('Invalid role');
     }
     return this.prisma.user.update({

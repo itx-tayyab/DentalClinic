@@ -1,10 +1,13 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AuthGuard } from '@nestjs/passport';
+import { Roles } from '../user/roles.decorator';
+import { RolesGuard } from '../user/roles.guard';
 import { AppointmentsService, resolveTimeZone } from './appointments.service';
 
 @Controller('appointments')
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), RolesGuard)
+@Roles('DOCTOR', 'ADMIN')
 export class AppointmentsController {
   constructor(
     private readonly appointmentsService: AppointmentsService,
