@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import type { Appointment } from "@/lib/api";
 import { formatTime } from "@/lib/api";
 import { ServiceChip } from "./ui/service-chip";
@@ -19,6 +19,26 @@ export function AppointmentDetailSheet({
   timeZone,
   onClose,
 }: AppointmentDetailSheetProps) {
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Keyboard accessibility: Escape to close & auto-focus
+  useEffect(() => {
+    if (!appointment) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    closeButtonRef.current?.focus();
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [appointment, onClose]);
+
   if (!appointment) return null;
 
   const startFormatted = formatTime(appointment.start, timeZone);
@@ -75,9 +95,10 @@ export function AppointmentDetailSheet({
             </h3>
           </div>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 focus-visible:outline-none"
+            className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-700"
             aria-label="Close details"
           >
             ✕

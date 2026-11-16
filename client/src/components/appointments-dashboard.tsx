@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import type { Appointment, AppointmentsResponse } from "@/lib/api";
 import {
   formatDateHeading,
@@ -21,6 +21,9 @@ import { AppointmentCardMobile } from "./appointment-card-mobile";
 import { FreeGapRow } from "./free-gap-row";
 import { AppointmentDetailSheet } from "./appointment-detail-sheet";
 import { WeekView } from "./week-view";
+import { OfflineBanner } from "./offline-banner";
+import { PwaInstallBanner } from "./pwa-install-banner";
+import { RefreshCwIcon } from "./ui/icons";
 import {
   EmptyState,
   ClosedSundayState,
@@ -51,6 +54,7 @@ export function AppointmentsDashboard({
   const [reloadKey, setReloadKey] = useState(0);
   const [lastUpdated, setLastUpdated] = useState<string>("11:35");
   const [currentTime, setCurrentTime] = useState<number>(0);
+  const [isCachedView, setIsCachedView] = useState(false);
   const [selectedAppointment, setSelectedAppointment] =
     useState<Appointment | null>(null);
   const [viewMode, setViewMode] = useState<"day" | "week">("day");
@@ -58,6 +62,44 @@ export function AppointmentsDashboard({
   // Week appointments cache: Record<dayDate, Appointment[]>
   const [weekData, setWeekData] = useState<Record<string, Appointment[]>>({});
   const [weekLoading, setWeekLoading] = useState(false);
+
+  // Pull-to-refresh on mobile touch
+  const [pullY, setPullY] = useState(0);
+  const [isPulling, setIsPulling] = useState(false);
+  const touchStartY = useRef(0);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (typeof window !== "undefined" && window.scrollY <= 2) {
+      const touch = e.touches[0];
+      if (touch) {
+        touchStartY.current = touch.clientY;
+        setIsPulling(true);
+      }
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!isPulling) return;
+    const touch = e.touches[0];
+    if (!touch) return;
+    const diff = touch.clientY - touchStartY.current;
+    if (diff > 0 && typeof window !== "undefined" && window.scrollY <= 2) {
+      setPullY(Math.min(diff * 0.45, 80));
+    } else {
+      setPullY(0);
+    }
+  };
+
+  const handleTouchEnd = () => {
+    if (pullY > 45) {
+      setReloadKey((prev) => prev + 1);
+      if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+        navigator.vibrate(15);
+      }
+    }
+    setPullY(0);
+    setIsPulling(false);
+  };
 
   // Fetch appointments for day view on date/reloadKey change
   useEffect(() => {
@@ -89,18 +131,49 @@ export function AppointmentsDashboard({
 
         if (active) {
           setData(payload);
+          setIsCachedView(false);
           const now = new Date();
+          const timeFormatted = now.toLocaleTimeString("en-GB", {
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+          });
           setCurrentTime(now.getTime());
-          setLastUpdated(
-            now.toLocaleTimeString("en-GB", {
-              hour: "2-digit",
-              minute: "2-digit",
-              hour12: false,
-            }),
-          );
+          setLastUpdated(timeFormatted);
+
+          // Save to local cache
+          try {
+            localStorage.setItem(
+              `brightsmile_cache_${date}`,
+              JSON.stringify({ payload, cachedAt: timeFormatted }),
+            );
+          } catch {
+            // ignore storage quota
+          }
         }
       } catch (caught: unknown) {
         if (!active || controller.signal.aborted) return;
+
+        // Try local storage cache fallback
+        try {
+          const cached = localStorage.getItem(`brightsmile_cache_${date}`);
+          if (cached) {
+            const parsed = JSON.parse(cached) as {
+              payload: unknown;
+              cachedAt?: string;
+            };
+            if (isAppointmentsResponse(parsed.payload)) {
+              setData(parsed.payload);
+              setIsCachedView(true);
+              if (parsed.cachedAt) setLastUpdated(parsed.cachedAt);
+              setError(null);
+              return;
+            }
+          }
+        } catch {
+          // fall through to error
+        }
+
         setError(
           caught instanceof Error
             ? caught.message
@@ -294,7 +367,32 @@ export function AppointmentsDashboard({
   const totalCount = appointments.length;
 
   return (
-    <div className="min-h-[100dvh] bg-zinc-50/70 pb-16">
+    <div
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      className="min-h-[100dvh] bg-zinc-50/70 pb-20 relative"
+    >
+      {/* Mobile Pull-to-refresh Indicator */}
+      {pullY > 0 ? (
+        <div
+          style={{ height: `${pullY}px` }}
+          className="flex items-center justify-center overflow-hidden transition-all bg-teal-50/70 text-teal-800 text-xs font-semibold"
+        >
+          <div className="flex items-center gap-2">
+            <RefreshCwIcon
+              size={16}
+              className={`transition-transform ${
+                pullY > 45 ? "animate-spin text-teal-700" : ""
+              }`}
+            />
+            <span>
+              {pullY > 45 ? "Release to refresh..." : "Pull down to refresh..."}
+            </span>
+          </div>
+        </div>
+      ) : null}
+
       {/* Header */}
       <ScheduleHeader
         viewMode={viewMode}
@@ -304,6 +402,9 @@ export function AppointmentsDashboard({
       />
 
       <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
+        {/* Offline Banner when offline or showing cached data */}
+        <OfflineBanner lastUpdated={lastUpdated} isCached={isCachedView} />
+
         {/* VIEW 1: WEEK VIEW */}
         {viewMode === "week" ? (
           <WeekView
@@ -469,123 +570,123 @@ export function AppointmentsDashboard({
                             return (
                               <React.Fragment key={appointment.id}>
                                 <AppointmentRowDesktop
-                              appointment={appointment}
-                              timeZone={timeZone}
-                              onSelect={() => setSelectedAppointment(appointment)}
-                            />
-                            {gap ? (
-                              <FreeGapRow
-                                startTime={gap.startTime}
-                                durationText={gap.durationText}
-                                untilText={gap.untilText}
-                                isDesktop
-                              />
-                            ) : null}
-                          </React.Fragment>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                                  appointment={appointment}
+                                  timeZone={timeZone}
+                                  onSelect={() => setSelectedAppointment(appointment)}
+                                />
+                                {gap ? (
+                                  <FreeGapRow
+                                    startTime={gap.startTime}
+                                    durationText={gap.durationText}
+                                    untilText={gap.untilText}
+                                    isDesktop
+                                  />
+                                ) : null}
+                              </React.Fragment>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
 
-                {/* Mobile view only reminder */}
-                <footer className="mt-8 text-center text-xs text-zinc-400 lg:hidden">
-                  View only. Bookings, changes and cancellations happen in WhatsApp.
-                </footer>
-              </section>
+                    {/* Mobile view only reminder */}
+                    <footer className="mt-8 text-center text-xs text-zinc-400 lg:hidden">
+                      View only. Bookings, changes and cancellations happen in WhatsApp.
+                    </footer>
+                  </section>
 
-              {/* Right Column: Sticky Sidebar on Desktop */}
-              <aside className="hidden lg:block lg:col-span-4 space-y-5">
-                {/* Now card */}
-                {activeAppointment ? (
-                  <NowCard
-                    patientName={activeAppointment.patientName}
-                    service={activeAppointment.service}
-                    timeRange={`${formatTime(
-                      activeAppointment.start,
-                      timeZone,
-                    )} – ${formatTime(activeAppointment.end, timeZone)}`}
-                    remainingMinutes={remainingNowMinutes}
-                    onClick={() => setSelectedAppointment(activeAppointment)}
-                    className="cursor-pointer"
-                  />
-                ) : null}
+                  {/* Right Column: Sticky Sidebar on Desktop */}
+                  <aside className="hidden lg:block lg:col-span-4 space-y-5">
+                    {/* Now card */}
+                    {activeAppointment ? (
+                      <NowCard
+                        patientName={activeAppointment.patientName}
+                        service={activeAppointment.service}
+                        timeRange={`${formatTime(
+                          activeAppointment.start,
+                          timeZone,
+                        )} – ${formatTime(activeAppointment.end, timeZone)}`}
+                        remainingMinutes={remainingNowMinutes}
+                        onClick={() => setSelectedAppointment(activeAppointment)}
+                        className="cursor-pointer"
+                      />
+                    ) : null}
 
-                {/* Next card */}
-                {nextAppointment ? (
-                  <NextUpCard
-                    patientName={nextAppointment.patientName}
-                    service={nextAppointment.service}
-                    timeRange={`${formatTime(
-                      nextAppointment.start,
-                      timeZone,
-                    )} – ${formatTime(nextAppointment.end, timeZone)}`}
-                    phone={nextAppointment.phone}
-                    inMinutes={inMinutesNext}
-                  />
-                ) : null}
+                    {/* Next card */}
+                    {nextAppointment ? (
+                      <NextUpCard
+                        patientName={nextAppointment.patientName}
+                        service={nextAppointment.service}
+                        timeRange={`${formatTime(
+                          nextAppointment.start,
+                          timeZone,
+                        )} – ${formatTime(nextAppointment.end, timeZone)}`}
+                        phone={nextAppointment.phone}
+                        inMinutes={inMinutesNext}
+                      />
+                    ) : null}
 
-                {/* Services distribution summary card */}
-                <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-xs">
-                  <h3 className="text-sm font-bold text-zinc-900">
-                    Services today
-                  </h3>
-                  <div className="mt-3 space-y-2.5">
-                    {Object.entries(serviceCounts).map(([srv, count]) => {
-                      const { dot } = getServiceColor(srv);
-                      return (
-                        <div
-                          key={srv}
-                          className="flex items-center justify-between text-xs"
-                        >
-                          <div className="flex items-center gap-2 text-zinc-700">
-                            <span
-                              className={`h-2 w-2 rounded-full ${dot}`}
-                              aria-hidden="true"
-                            />
-                            <span>{srv}</span>
-                          </div>
-                          <span className="font-bold tabular-nums text-zinc-900">
-                            {count}
-                          </span>
+                    {/* Services distribution summary card */}
+                    <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-xs">
+                      <h3 className="text-sm font-bold text-zinc-900">
+                        Services today
+                      </h3>
+                      <div className="mt-3 space-y-2.5">
+                        {Object.entries(serviceCounts).map(([srv, count]) => {
+                          const { dot } = getServiceColor(srv);
+                          return (
+                            <div
+                              key={srv}
+                              className="flex items-center justify-between text-xs"
+                            >
+                              <div className="flex items-center gap-2 text-zinc-700">
+                                <span
+                                  className={`h-2 w-2 rounded-full ${dot}`}
+                                  aria-hidden="true"
+                                />
+                                <span>{srv}</span>
+                              </div>
+                              <span className="font-bold tabular-nums text-zinc-900">
+                                {count}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Booked / Free hours metric */}
+                    <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-xs">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <p className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wide">
+                            Booked
+                          </p>
+                          <p className="mt-1 text-xl font-bold tabular-nums text-zinc-900">
+                            {bookedText}
+                          </p>
                         </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Booked / Free hours metric */}
-                <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-xs">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wide">
-                        Booked
-                      </p>
-                      <p className="mt-1 text-xl font-bold tabular-nums text-zinc-900">
-                        {bookedText}
-                      </p>
+                        <div>
+                          <p className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wide">
+                            Free
+                          </p>
+                          <p className="mt-1 text-xl font-bold tabular-nums text-zinc-900">
+                            {freeText}
+                          </p>
+                        </div>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wide">
-                        Free
-                      </p>
-                      <p className="mt-1 text-xl font-bold tabular-nums text-zinc-900">
-                        {freeText}
-                      </p>
-                    </div>
-                  </div>
-                </div>
 
-                {/* Reassurance text */}
-                <p className="text-center text-xs text-zinc-400">
-                  View only. Bookings, changes and cancellations happen in WhatsApp.
-                </p>
-              </aside>
-            </div>
+                    {/* Reassurance text */}
+                    <p className="text-center text-xs text-zinc-400">
+                      View only. Bookings, changes and cancellations happen in WhatsApp.
+                    </p>
+                  </aside>
+                </div>
+              </>
+            ) : null}
           </>
-        ) : null}
-        </>
-      )}
+        )}
       </main>
 
       {/* Appointment Detail Bottom Sheet (Decision #2) */}
@@ -594,6 +695,9 @@ export function AppointmentsDashboard({
         timeZone={timeZone}
         onClose={() => setSelectedAppointment(null)}
       />
+
+      {/* PWA Add to Home Screen Banner */}
+      <PwaInstallBanner />
     </div>
   );
 }
