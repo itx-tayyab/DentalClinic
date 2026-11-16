@@ -8,7 +8,7 @@ async function bootstrap() {
   app.use(cookieParser());
 
   app.enableCors({
-    origin: "http://localhost:3000",
+    origin: 'http://localhost:3000',
     credentials: true,
   });
 
@@ -16,4 +16,4 @@ async function bootstrap() {
     console.log('Server running on 8000');
   });
 }
-bootstrap();
+void bootstrap();

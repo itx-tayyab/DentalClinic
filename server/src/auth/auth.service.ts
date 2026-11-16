@@ -59,7 +59,7 @@ export class AuthService {
       throw new BadRequestException('Invalid email or password');
     }
 
-    const payload = { id: user.id, email: user.email, role: user.role};
+    const payload = { id: user.id, email: user.email, role: user.role };
 
     // Generate Access and Refresh Tokens
     // The access token is signed with the JwtModule secret (ACCESS_TOKEN_SECRET).
@@ -82,4 +82,3 @@ export class AuthService {
     };
   }
 }
-

@@ -15,20 +15,28 @@ export class UserController {
   async getUsersForModerator() {
     const users = await this.userService.getAllUsers();
 
-    const filtered = users.filter(u => u.role !== 'ADMIN');
+    const filtered = users.filter((u) => u.role !== 'ADMIN');
     // Return only name & email
-    return filtered.map(u => ({ name: u.name, email: u.email, role: u.role }));
+    return filtered.map((u) => ({
+      name: u.name,
+      email: u.email,
+      role: u.role,
+    }));
   }
 
   // Admin: view all users (name, email, role)
   @Get('admin/list')
   @Roles('ADMIN') // admin only
   async getUsersForAdmin() {
-
     const admin = await this.userService.getAllUsers();
-    const adminfiltered = admin.filter(u => u.role !== 'ADMIN');
+    const adminfiltered = admin.filter((u) => u.role !== 'ADMIN');
 
-    return adminfiltered.map(u => ({ id: u.id, name: u.name, email: u.email, role: u.role }));
+    return adminfiltered.map((u) => ({
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      role: u.role,
+    }));
   }
 
   // Admin: update role

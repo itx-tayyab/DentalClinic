@@ -37,10 +37,6 @@ import { JwtStrategy } from './jwt.startegy';
     JwtStrategy, // MUST be included
   ],
 
-  exports: [
-    AuthService,
-    JwtStrategy,
-    PassportModule,
-  ],
+  exports: [AuthService, JwtStrategy, PassportModule],
 })
 export class AuthModule {}
