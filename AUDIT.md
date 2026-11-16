@@ -143,3 +143,30 @@ to delete.
 
 All `REVIEW` rows above, plus: the auth flow, the user/PII endpoints, the existing Prisma migration, and
 the admin/moderator/user dashboard pages. Migrations are additive only; nothing is dropped.
+
+## Package update record (Phase 3)
+
+Updated to the latest stable within the constraints below:
+
+- Client: Next 16.0.0 → 16.4.6, React/React DOM 19.2.0 → 19.3.1, `eslint-config-next` 16.4.6,
+  TypeScript 5 → 6.0.3, `@types/node` 20 → 26.6.6, ESLint 9 → 10.15.0.
+- Server: NestJS 11 → 12.5.0 (`common`, `core`, `platform-express`, `testing`, `jwt`, `passport`,
+  `config` 4 → 12, `cli`/`schematics` 12), TypeScript 5.9 → 6.0.3, `@types/node` 22 → 26.6.6,
+  ESLint 9 → 10.15.0 (+ `@eslint/js` 10, `globals` 17), Jest 30.5.2, ts-jest 29.4.15,
+  typescript-eslint 8.72.2, Prettier 3.10.1, class-validator 0.14 → 0.15.1, rxjs 7.8.2.
+- Node base images: `node:18` → `node:26.13.1-alpine` (current Active LTS "Lithium", pinned exact).
+
+### Major bumps deliberately pinned
+
+| Package | Latest | Kept at | Reason |
+| --- | --- | --- | --- |
+| Prisma (`prisma`, `@prisma/client`) | 7.10.1 | 6.19.3 | Prisma 7 is ESM-only, requires `prisma.config.ts`, a required generator `output`, and a driver adapter (`@prisma/adapter-pg`). Migrating the CommonJS NestJS server (plus Jest, ts-jest and its CommonJS emit) to ESM is a separate, larger change. Pinned to the latest v6 patch. Revisit as its own task. |
+| TypeScript | 7.0.2 | 6.0.3 | TypeScript 7 is the new native compiler. `typescript-eslint` 8.72 declares `typescript >=4.8.4 <6.1.0` and `ts-jest` declares `<7`, and Nest 12's schematics require TypeScript 6. Installing TS 7 would break lint/test tooling. |
+| `@nestjs/schematics` | 12.0.13 | 12.0.13 | (Not pinned — listed for context: it enforces TypeScript 6, which is why TS 6 is the ceiling.) |
+
+ESLint 10 and TypeScript 6 both work with the existing configs after the changes in this phase
+(`typescript-eslint` supports `eslint ^10`, `eslint-config-next` supports `>=9`).
+
+Jest on Nest 12 needs `NODE_OPTIONS=--experimental-vm-modules` on Node 26 because the Nest 12
+packages are ESM-only and Jest needs its VM module support to `require(esm)`. This is set in the
+server `test*` scripts.
