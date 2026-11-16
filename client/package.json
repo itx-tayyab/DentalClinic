@@ -6,9 +6,12 @@
     "dev": "next dev --webpack",
     "build": "next build --webpack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/lib/appointments.test.ts src/lib/session.test.ts"
   },
   "dependencies": {
+    "@date-fns/tz": "^1.5.0",
     "next": "16.4.6",
     "react": "19.3.1",
     "react-dom": "19.3.1"
@@ -22,6 +25,10 @@
     "eslint": "^10.15.0",
     "eslint-config-next": "16.4.6",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3"
+  },
+  "engines": {
+    "node": ">=26.13.1"
   }
 }
