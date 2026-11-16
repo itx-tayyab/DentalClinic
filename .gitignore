@@ -28,3 +28,7 @@ Thumbs.db
 # Local database / dumps
 *.sql.gz
 *.dump
+
+# Antigravity Kit
+.agents/
+AGENTS.md
