@@ -127,3 +127,10 @@ were not touched.
   working tree, but it remains in git history. Deleting `/server` does not remove git history.
 - The new dashboard secrets (`N8N_DASHBOARD_KEY`, `DASHBOARD_PASSWORD`) were never committed and are
   read only from server-side environment variables.
+
+## Dependency check (Phase 2)
+
+`npx depcheck` in `/client` reports **no unused runtime dependencies** and no missing imports.
+Its dev-dependency flags (`tailwindcss`, `@tailwindcss/postcss`, `@types/node`, `@types/react-dom`) are
+false positives: Tailwind v4 is loaded by `postcss.config.mjs`, and the `@types` packages supply the
+ambient types used by the Next.js config and React DOM. Nothing was removed.
