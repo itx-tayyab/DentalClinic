@@ -4,12 +4,14 @@ import { SignupDto } from './DTO/signup.dto';
 import { SigninDto } from './DTO/signin.dto';
 import * as bcrypt from 'bcryptjs';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
   ) {}
 
   async signup(dto: SignupDto) {
@@ -32,7 +34,15 @@ export class AuthService {
       },
     });
 
-    return { message: 'Signup successful', user };
+    return {
+      message: 'Signup successful',
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
+    };
   }
 
   async signin(dto: SigninDto) {
@@ -52,13 +62,11 @@ export class AuthService {
     const payload = { id: user.id, email: user.email, role: user.role};
 
     // Generate Access and Refresh Tokens
-    const accessToken = this.jwtService.sign(payload, {
-      secret: process.env.ACCESS_TOKEN_SECRET,
-      expiresIn: '1h',
-    });
+    // The access token is signed with the JwtModule secret (ACCESS_TOKEN_SECRET).
+    const accessToken = this.jwtService.sign(payload);
 
     const refreshToken = this.jwtService.sign(payload, {
-      secret: process.env.REFRESH_TOKEN_SECRET,
+      secret: this.configService.getOrThrow<string>('REFRESH_TOKEN_SECRET'),
       expiresIn: '7d',
     });
 

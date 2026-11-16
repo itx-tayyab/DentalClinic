@@ -22,7 +22,7 @@ import { JwtStrategy } from './jwt.startegy';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (configService: ConfigService): JwtModuleOptions => ({
-        secret: configService.get<string>('ACCESS_TOKEN_SECRET') || 'defaultSecret',
+        secret: configService.getOrThrow<string>('ACCESS_TOKEN_SECRET'),
         signOptions: {
           expiresIn: '1h',
         },
