@@ -11,9 +11,6 @@ import { JwtStrategy } from './jwt.startegy';
   imports: [
     PrismaModule,
 
-    // Make env readable everywhere
-    ConfigModule.forRoot({ isGlobal: true }),
-
     // Register Passport with jwt strategy
     PassportModule.register({ defaultStrategy: 'jwt' }),
 
